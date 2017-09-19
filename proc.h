@@ -10,7 +10,7 @@ struct cpu {
   struct proc *proc;           // The process running on this cpu or null
 };
 
-extern struct cpu cpus[NCPU];
+extern struct cpu cpus[NCPU];  // 最大8个CPU
 extern int ncpu;
 
 //PAGEBREAK: 17

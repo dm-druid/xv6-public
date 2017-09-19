@@ -17,9 +17,9 @@ extern char end[]; // first address after kernel loaded from ELF file
 int
 main(void)
 {
-  kinit1(end, P2V(4*1024*1024)); // phys page allocator
-  kvmalloc();      // kernel page table
-  mpinit();        // detect other processors
+  kinit1(end, P2V(4*1024*1024)); // phys page allocator 在ELF文件后面开辟4MB的内存页
+  kvmalloc();      // kernel page table                 实现内核新页表的初始化
+  mpinit();        // detect other processors           在地址空间中找到mp结构，获得每个cpu的apicid和cpu的数量
   lapicinit();     // interrupt controller
   seginit();       // segment descriptors
   picinit();       // disable pic
@@ -27,14 +27,14 @@ main(void)
   consoleinit();   // console hardware
   uartinit();      // serial port
   pinit();         // process table
-  tvinit();        // trap vectors
+  tvinit();        // trap vectors                      设置idt表中的256个表项
   binit();         // buffer cache
   fileinit();      // file table
   ideinit();       // disk 
-  startothers();   // start other processors
-  kinit2(P2V(4*1024*1024), P2V(PHYSTOP)); // must come after startothers()
-  userinit();      // first user process
-  mpmain();        // finish this processor's setup
+  startothers();   // start other processors            多核启动
+  kinit2(P2V(4*1024*1024), P2V(PHYSTOP)); // must come after startothers() 在多核CPU启动之后再开始启动锁机制
+  userinit();      // first user process 建立第一个进程
+  mpmain();        // finish this processor's setup 
 }
 
 // Other CPUs jump here from entryother.S.
@@ -52,7 +52,7 @@ static void
 mpmain(void)
 {
   cprintf("cpu%d: starting %d\n", cpuid(), cpuid());
-  idtinit();       // load idt register
+  idtinit();       // load idt register 中断描述符表
   xchg(&(mycpu()->started), 1); // tell startothers() we're up
   scheduler();     // start running processes
 }

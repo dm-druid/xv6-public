@@ -20,9 +20,10 @@ tvinit(void)
   int i;
 
   for(i = 0; i < 256; i++)
-    SETGATE(idt[i], 0, SEG_KCODE<<3, vectors[i], 0);
-  SETGATE(idt[T_SYSCALL], 1, SEG_KCODE<<3, vectors[T_SYSCALL], DPL_USER);
-
+    SETGATE(idt[i], 0, SEG_KCODE<<3, vectors[i], 0);  // 设置各个中断描述符
+  // 64号为 trap gate, 用户程序可以通过int 指令产生一个陷入
+  SETGATE(idt[T_SYSCALL], 1, SEG_KCODE<<3, vectors[T_SYSCALL], DPL_USER); 
+  
   initlock(&tickslock, "time");
 }
 
@@ -36,17 +37,17 @@ idtinit(void)
 void
 trap(struct trapframe *tf)
 {
-  if(tf->trapno == T_SYSCALL){
+  if(tf->trapno == T_SYSCALL){    // 系统调用
     if(myproc()->killed)
       exit();
-    myproc()->tf = tf;
+    myproc()->tf = tf;            // 重新更新了tf的地址，这样做的原因是trapframe的大小由于可能硬件未压入ss和esp导致不一致，而任务栈ts总是指向内核栈所在页的最高地址处
     syscall();
     if(myproc()->killed)
       exit();
     return;
   }
 
-  switch(tf->trapno){
+  switch(tf->trapno){             // 调用相应的函数处理各种中断类型
   case T_IRQ0 + IRQ_TIMER:
     if(cpuid() == 0){
       acquire(&tickslock);

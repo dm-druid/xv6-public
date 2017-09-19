@@ -12,9 +12,9 @@
 void
 initlock(struct spinlock *lk, char *name)
 {
-  lk->name = name;
-  lk->locked = 0;
-  lk->cpu = 0;
+  lk->name = name;  // 分配锁的名字
+  lk->locked = 0;   // 是否上锁
+  lk->cpu = 0;      // 由于每个cpu只有一个当前运行的线程，所以该锁被某个CPU占用
 }
 
 // Acquire the lock.
@@ -24,11 +24,12 @@ initlock(struct spinlock *lk, char *name)
 void
 acquire(struct spinlock *lk)
 {
-  pushcli(); // disable interrupts to avoid deadlock.
+  pushcli(); // disable interrupts to avoid deadlock. 关中断
   if(holding(lk))
     panic("acquire");
 
-  // The xchg is atomic.
+  // The xchg is atomic. 
+  // 原子性操作，交换取出锁的状态，如果是1（上锁）就继续循环。
   while(xchg(&lk->locked, 1) != 0)
     ;
 
@@ -57,6 +58,8 @@ release(struct spinlock *lk)
   // section are visible to other cores before the lock is released.
   // Both the C compiler and the hardware may re-order loads and
   // stores; __sync_synchronize() tells them both not to.
+  // 告诉编译器和处理器在锁释放之前不要调整 loads 和 stores 的语句顺序
+  // 同时临界区的store对于其他核来说都是可见的。
   __sync_synchronize();
 
   // Release the lock, equivalent to lk->locked = 0.
@@ -106,7 +109,7 @@ pushcli(void)
   cli();
   if(mycpu()->ncli == 0)
     mycpu()->intena = eflags & FL_IF;
-  mycpu()->ncli += 1;
+  mycpu()->ncli += 1; // 计数功能
 }
 
 void

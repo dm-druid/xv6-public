@@ -3,7 +3,7 @@
   # vectors.S sends all traps here.
 .globl alltraps
 alltraps:
-  # Build trap frame.
+  # Build trap frame. 压入trapframe结构体，包含了中断发生时的寄存器状态
   pushl %ds
   pushl %es
   pushl %fs
@@ -28,5 +28,5 @@ trapret:
   popl %fs
   popl %es
   popl %ds
-  addl $0x8, %esp  # trapno and errcode
-  iret
+  addl $0x8, %esp  # 跳过了2个field trapno and errcode
+  iret             # 从中断状态恢复，pops %cs, %eip, %flags, %esp, and %ss

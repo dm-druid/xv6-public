@@ -37,6 +37,7 @@ multiboot_header:
 # By convention, the _start symbol specifies the ELF entry point.
 # Since we haven't set up virtual memory yet, our entry point is
 # the physical address of 'entry'.
+# 跳转到entry入口
 .globl _start
 _start = V2P_WO(entry)
 
@@ -44,10 +45,17 @@ _start = V2P_WO(entry)
 .globl entry
 entry:
   # Turn on page size extension for 4Mbyte pages
+  # 打开控制寄存器 cr4 的PSE开关，从而使内存页大小变为4MB
+  # 分页机制为一级页表
   movl    %cr4, %eax
   orl     $(CR4_PSE), %eax
   movl    %eax, %cr4
+  
   # Set page directory
+  # unsigned int entrypgdir[1024] = {
+  #     [0] = 0 | 0x001 | 0x002 | 0x080,  // 0x083 = 0000 1000 0011
+  #     [0x80000000 >> 22] = 0 | 0x001 | 0x002 | 0x080  // 0x083
+  # };
   movl    $(V2P_WO(entrypgdir)), %eax
   movl    %eax, %cr3
   # Turn on paging.
@@ -66,3 +74,5 @@ entry:
   jmp *%eax
 
 .comm stack, KSTACKSIZE
+# KSTACKSIZE = 4096
+# 通过 .comm 在内核 bbs 段开辟了一段 KSTACKSIZE = 4096 = 4KB 大小的内核栈

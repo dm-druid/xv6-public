@@ -32,16 +32,17 @@ seginit(void)
 // Return the address of the PTE in page table pgdir
 // that corresponds to virtual address va.  If alloc!=0,
 // create any required page table pages.
+// 返回虚拟地址在页表中的物理地址
 static pte_t *
 walkpgdir(pde_t *pgdir, const void *va, int alloc)
 {
   pde_t *pde;
   pte_t *pgtab;
 
-  pde = &pgdir[PDX(va)];
-  if(*pde & PTE_P){
+  pde = &pgdir[PDX(va)];      // 取出高十位的一级页表索引，用到pde上
+  if(*pde & PTE_P){           // 一级页表如果已经占用，就直接取出pde指向的二级页表的高20位地址
     pgtab = (pte_t*)P2V(PTE_ADDR(*pde));
-  } else {
+  } else {                    // 否则申请一页
     if(!alloc || (pgtab = (pte_t*)kalloc()) == 0)
       return 0;
     // Make sure all those PTE_P bits are zero.
@@ -57,21 +58,22 @@ walkpgdir(pde_t *pgdir, const void *va, int alloc)
 // Create PTEs for virtual addresses starting at va that refer to
 // physical addresses starting at pa. va and size might not
 // be page-aligned.
+// 一页一页地为一段虚拟内存和物理内存之间建立对应的映射关系
 static int
 mappages(pde_t *pgdir, void *va, uint size, uint pa, int perm)
 {
   char *a, *last;
   pte_t *pte;
 
-  a = (char*)PGROUNDDOWN((uint)va);
+  a = (char*)PGROUNDDOWN((uint)va);         // 虚拟地址的起始和终止位置
   last = (char*)PGROUNDDOWN(((uint)va) + size - 1);
   for(;;){
     if((pte = walkpgdir(pgdir, a, 1)) == 0)
       return -1;
-    if(*pte & PTE_P)
+    if(*pte & PTE_P)                        // 页表项权限为已使用，则报错remap
       panic("remap");
-    *pte = pa | perm | PTE_P;
-    if(a == last)
+    *pte = pa | perm | PTE_P;               // 偏移量 + 标志位信息 + 标记为已使用
+    if(a == last)                           // 循环直到完成所有映射任务
       break;
     a += PGSIZE;
     pa += PGSIZE;
@@ -120,7 +122,8 @@ setupkvm(void)
 {
   pde_t *pgdir;
   struct kmap *k;
-
+  
+  // 分配一页内存放置页目录
   if((pgdir = (pde_t*)kalloc()) == 0)
     return 0;
   memset(pgdir, 0, PGSIZE);
@@ -146,6 +149,7 @@ kvmalloc(void)
 
 // Switch h/w page table register to the kernel-only page table,
 // for when no process is running.
+// 当没有进程在运行的时候将内核页表放入硬件的页表寄存器
 void
 switchkvm(void)
 {
@@ -163,7 +167,7 @@ switchuvm(struct proc *p)
   if(p->pgdir == 0)
     panic("switchuvm: no pgdir");
 
-  pushcli();
+  pushcli();    // 关中断
   mycpu()->gdt[SEG_TSS] = SEG16(STS_T32A, &mycpu()->ts,
                                 sizeof(mycpu()->ts)-1, 0);
   mycpu()->gdt[SEG_TSS].s = 0;
@@ -173,8 +177,8 @@ switchuvm(struct proc *p)
   // forbids I/O instructions (e.g., inb and outb) from user space
   mycpu()->ts.iomb = (ushort) 0xFFFF;
   ltr(SEG_TSS << 3);
-  lcr3(V2P(p->pgdir));  // switch to process's address space
-  popcli();
+  lcr3(V2P(p->pgdir));  // switch to process's address space 通过控制寄存器改变当前页表目录
+  popcli();   // 开中断
 }
 
 // Load the initcode into address 0 of pgdir.
@@ -184,16 +188,18 @@ inituvm(pde_t *pgdir, char *init, uint sz)
 {
   char *mem;
 
-  if(sz >= PGSIZE)
+  if(sz >= PGSIZE)  // 一页以内的size大小
     panic("inituvm: more than a page");
-  mem = kalloc();
-  memset(mem, 0, PGSIZE);
+  mem = kalloc();   // 分配一页空白内存
+  memset(mem, 0, PGSIZE);   // 初始化
+  // 虚拟地址和物理地址的一一映射
   mappages(pgdir, 0, PGSIZE, V2P(mem), PTE_W|PTE_U);
-  memmove(mem, init, sz);
+  memmove(mem, init, sz);   //将initcode的内容移入mem的部分
 }
 
 // Load a program segment into pgdir.  addr must be page-aligned
 // and the pages from addr to addr+sz must already be mapped.
+// offset 是段在ELF文件中的偏移， ip是对应的文件节点指针 
 int
 loaduvm(pde_t *pgdir, char *addr, struct inode *ip, uint offset, uint sz)
 {
@@ -201,15 +207,16 @@ loaduvm(pde_t *pgdir, char *addr, struct inode *ip, uint offset, uint sz)
   pte_t *pte;
 
   if((uint) addr % PGSIZE != 0)
-    panic("loaduvm: addr must be page aligned");
+    panic("loaduvm: addr must be page aligned"); 
   for(i = 0; i < sz; i += PGSIZE){
-    if((pte = walkpgdir(pgdir, addr+i, 0)) == 0)
+    if((pte = walkpgdir(pgdir, addr+i, 0)) == 0) // 虚拟地址对应的页已经被分配
       panic("loaduvm: address should exist");
     pa = PTE_ADDR(*pte);
     if(sz - i < PGSIZE)
       n = sz - i;
     else
       n = PGSIZE;
+    // read data 从对应的物理地址读出文件内容
     if(readi(ip, P2V(pa), offset+i, n) != n)
       return -1;
   }
@@ -218,6 +225,8 @@ loaduvm(pde_t *pgdir, char *addr, struct inode *ip, uint offset, uint sz)
 
 // Allocate page tables and physical memory to grow process from oldsz to
 // newsz, which need not be page aligned.  Returns new size or 0 on error.
+// 从 oldsize 扩展到 newsize 分配页表和物理内存
+// allocuvm(pgdir     , sz        , ph.vaddr + ph.memsz) 对应一下exec调用的参数，这里sz=0
 int
 allocuvm(pde_t *pgdir, uint oldsz, uint newsz)
 {
@@ -231,13 +240,14 @@ allocuvm(pde_t *pgdir, uint oldsz, uint newsz)
 
   a = PGROUNDUP(oldsz);
   for(; a < newsz; a += PGSIZE){
-    mem = kalloc();
+    mem = kalloc();               // 申请一个空闲页
     if(mem == 0){
       cprintf("allocuvm out of memory\n");
       deallocuvm(pgdir, newsz, oldsz);
       return 0;
     }
-    memset(mem, 0, PGSIZE);
+    memset(mem, 0, PGSIZE);       // 页面数据清空
+    // 将虚拟地址和物理地址建立映射关系，这里a是虚拟地址，V2P(mem)是申请到的页对应的物理地址
     if(mappages(pgdir, (char*)a, PGSIZE, V2P(mem), PTE_W|PTE_U) < 0){
       cprintf("allocuvm out of memory (2)\n");
       deallocuvm(pgdir, newsz, oldsz);
@@ -263,10 +273,13 @@ deallocuvm(pde_t *pgdir, uint oldsz, uint newsz)
 
   a = PGROUNDUP(newsz);
   for(; a  < oldsz; a += PGSIZE){
+    // 获取进程页表下虚拟地址a对应的页
     pte = walkpgdir(pgdir, (char*)a, 0);
-    if(!pte)
+    if(!pte)  // 页项为没有被占用
+      // 获得一级页目录的下一项的第一页的偏移0的虚拟地址，再减去一页大小的位置
+      // 因为本页不使用，所以否定了该目录下的所有页？直接跳到下一个目录Page Directory去？
       a = PGADDR(PDX(a) + 1, 0, 0) - PGSIZE;
-    else if((*pte & PTE_P) != 0){
+    else if((*pte & PTE_P) != 0){ // 如果该页标记为已使用
       pa = PTE_ADDR(*pte);
       if(pa == 0)
         panic("kfree");

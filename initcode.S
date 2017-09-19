@@ -8,11 +8,11 @@
 # exec(init, argv)
 .globl start
 start:
-  pushl $argv
-  pushl $init
+  pushl $argv  // 压入所需参数
+  pushl $init  // 压入执行的函数名
   pushl $0  // where caller pc would be
   movl $SYS_exec, %eax
-  int $T_SYSCALL
+  int $T_SYSCALL  // 第三章
 
 # for(;;) exit();
 exit:

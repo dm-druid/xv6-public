@@ -40,6 +40,7 @@ memset(void *dst, int c, uint n)
   return dst;
 }
 
+// 检查 字符串s是否有c这个字符，返回其第一个位置
 char*
 strchr(const char *s, char c)
 {

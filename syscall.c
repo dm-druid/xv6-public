@@ -61,8 +61,9 @@ argptr(int n, char **pp, int size)
   int i;
   struct proc *curproc = myproc();
  
-  if(argint(n, &i) < 0)
+  if(argint(n, &i) < 0) // 获取参数的时候检查一下
     return -1;
+  // 转化成指针时再检查一下是否在进程的地址空间内
   if(size < 0 || (uint)i >= curproc->sz || (uint)i+size > curproc->sz)
     return -1;
   *pp = (char*)i;

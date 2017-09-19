@@ -13,29 +13,33 @@
 
 #define MAXARGS 10
 
+
+// All commands have at least a type. Have looked at the type, the code
+// typically casts the *cmd to some specific cmd type.
+// 所有命令的基类
 struct cmd {
-  int type;
+  int type; //  ' ' 代表 (exec), | 代表 (pipe), '<' or '>' 代表 redirection
 };
 
 struct execcmd {
-  int type;
-  char *argv[MAXARGS];
-  char *eargv[MAXARGS];
+  int type;             // ' '
+  char *argv[MAXARGS];  // 参数
+  char *eargv[MAXARGS]; //
 };
 
 struct redircmd {
-  int type;
-  struct cmd *cmd;
-  char *file;
+  int type;         // < or > 
+  struct cmd *cmd;  // 重定向需要执行的命令
+  char *file;       ／／输入输出文件
   char *efile;
-  int mode;
-  int fd;
+  int mode;／／打开文件方式
+  int fd;／／文件描述符
 };
 
 struct pipecmd {
-  int type;
-  struct cmd *left;
-  struct cmd *right;
+  int type;// |
+  struct cmd *left;／／左边负责读出数据的命令
+  struct cmd *right;／／右边负责写入数据的命令
 };
 
 struct listcmd {
@@ -53,7 +57,7 @@ int fork1(void);  // Fork but panics on failure.
 void panic(char*);
 struct cmd *parsecmd(char*);
 
-// Execute cmd.  Never returns.
+// Execute cmd.  Never returns. 真正实现shell的核心，永不return
 void
 runcmd(struct cmd *cmd)
 {
@@ -130,11 +134,12 @@ runcmd(struct cmd *cmd)
   exit();
 }
 
+// 读入指令
 int
 getcmd(char *buf, int nbuf)
 {
   printf(2, "$ ");
-  memset(buf, 0, nbuf);
+  memset(buf, 0, nbuf); // 清零
   gets(buf, nbuf);
   if(buf[0] == 0) // EOF
     return -1;
@@ -148,6 +153,7 @@ main(void)
   int fd;
 
   // Ensure that three file descriptors are open.
+  // while 循环分别分配3个文件描述符 0 1 2
   while((fd = open("console", O_RDWR)) >= 0){
     if(fd >= 3){
       close(fd);
@@ -157,6 +163,7 @@ main(void)
 
   // Read and run input commands.
   while(getcmd(buf, sizeof(buf)) >= 0){
+    // 如果指令是cd切换当前目录的话
     if(buf[0] == 'c' && buf[1] == 'd' && buf[2] == ' '){
       // Chdir must be called by the parent, not the child.
       buf[strlen(buf)-1] = 0;  // chop \n
@@ -164,9 +171,10 @@ main(void)
         printf(2, "cannot cd %s\n", buf+3);
       continue;
     }
+    // fork子进程
     if(fork1() == 0)
-      runcmd(parsecmd(buf));
-    wait();
+      runcmd(parsecmd(buf));  // 子进程执行pasecmd
+    wait();   // 父进程等待子进程结束
   }
   exit();
 }
@@ -183,7 +191,7 @@ fork1(void)
 {
   int pid;
 
-  pid = fork();
+  pid = fork(); // 分配一个新进程，返回它的进程号
   if(pid == -1)
     panic("fork");
   return pid;
@@ -262,6 +270,7 @@ backcmd(struct cmd *subcmd)
 char whitespace[] = " \t\r\n\v";
 char symbols[] = "<|>&;()";
 
+// 把下一个tokken吞掉
 int
 gettoken(char **ps, char *es, char **q, char **eq)
 {
@@ -273,7 +282,7 @@ gettoken(char **ps, char *es, char **q, char **eq)
     s++;
   if(q)
     *q = s;
-  ret = *s;
+  ret = *s; // 
   switch(*s){
   case 0:
     break;
@@ -288,14 +297,14 @@ gettoken(char **ps, char *es, char **q, char **eq)
   case '>':
     s++;
     if(*s == '>'){
-      ret = '+';
+      ret = '+';  // >> ret +
       s++;
     }
     break;
   default:
     ret = 'a';
     while(s < es && !strchr(whitespace, *s) && !strchr(symbols, *s))
-      s++;
+      s++;  // 跳过不是空白符和上面的符号，也就是说是字母数字，跳过一个变量
     break;
   }
   if(eq)
@@ -307,6 +316,7 @@ gettoken(char **ps, char *es, char **q, char **eq)
   return ret;
 }
 
+// 跳过*ps开头的空白符，返回其首位置，如果toks字符串中没有这个首字符就返回0
 int
 peek(char **ps, char *es, char *toks)
 {
@@ -314,7 +324,7 @@ peek(char **ps, char *es, char *toks)
 
   s = *ps;
   while(s < es && strchr(whitespace, *s))
-    s++;
+    s++; // 跳过空白符
   *ps = s;
   return *s && strchr(toks, *s);
 }
@@ -330,8 +340,8 @@ parsecmd(char *s)
   char *es;
   struct cmd *cmd;
 
-  es = s + strlen(s);
-  cmd = parseline(&s, es);
+  es = s + strlen(s); // end 末尾，\0
+  cmd = parseline(&s, es);  
   peek(&s, es, "");
   if(s != es){
     printf(2, "leftovers: %s\n", s);
@@ -346,14 +356,14 @@ parseline(char **ps, char *es)
 {
   struct cmd *cmd;
 
-  cmd = parsepipe(ps, es);
-  while(peek(ps, es, "&")){
-    gettoken(ps, es, 0, 0);
-    cmd = backcmd(cmd);
+  cmd = parsepipe(ps, es);  // 核心函数
+  while(peek(ps, es, "&")){  // 首字母为 &
+    gettoken(ps, es, 0, 0); // 读取掉这个符号
+    cmd = backcmd(cmd);   // &后续 backcmd
   }
   if(peek(ps, es, ";")){
     gettoken(ps, es, 0, 0);
-    cmd = listcmd(cmd, parseline(ps, es));
+    cmd = listcmd(cmd, parseline(ps, es));  // 以“;”结束的cmd，cmd为后续的字符串
   }
   return cmd;
 }
@@ -377,9 +387,9 @@ parseredirs(struct cmd *cmd, char **ps, char *es)
   int tok;
   char *q, *eq;
 
-  while(peek(ps, es, "<>")){
+  while(peek(ps, es, "<>")){ // cmd > ps..  类似这种的重定向
     tok = gettoken(ps, es, 0, 0);
-    if(gettoken(ps, es, &q, &eq) != 'a')
+    if(gettoken(ps, es, &q, &eq) != 'a')  // 不是文件名 或者 描述符数字
       panic("missing file for redirection");
     switch(tok){
     case '<':
@@ -388,7 +398,7 @@ parseredirs(struct cmd *cmd, char **ps, char *es)
     case '>':
       cmd = redircmd(cmd, q, eq, O_WRONLY|O_CREATE, 1);
       break;
-    case '+':  // >>
+    case '+':  
       cmd = redircmd(cmd, q, eq, O_WRONLY|O_CREATE, 1);
       break;
     }
@@ -403,12 +413,12 @@ parseblock(char **ps, char *es)
 
   if(!peek(ps, es, "("))
     panic("parseblock");
-  gettoken(ps, es, 0, 0);
-  cmd = parseline(ps, es);
+  gettoken(ps, es, 0, 0); // 吞掉左边（
+  cmd = parseline(ps, es); // 读取括号内的cmd
   if(!peek(ps, es, ")"))
     panic("syntax - missing )");
-  gettoken(ps, es, 0, 0);
-  cmd = parseredirs(cmd, ps, es);
+  gettoken(ps, es, 0, 0); // 吞掉右边）
+  cmd = parseredirs(cmd, ps, es); // 读取后续cmd
   return cmd;
 }
 
@@ -420,15 +430,15 @@ parseexec(char **ps, char *es)
   struct execcmd *cmd;
   struct cmd *ret;
 
-  if(peek(ps, es, "("))
+  if(peek(ps, es, "(")) // 如果ps去掉空白符以“(”开头
     return parseblock(ps, es);
 
-  ret = execcmd();
-  cmd = (struct execcmd*)ret;
+  ret = execcmd();  // 返回一个可执行的空白cmd
+  cmd = (struct execcmd*)ret;  // 类型转换
 
   argc = 0;
   ret = parseredirs(ret, ps, es);
-  while(!peek(ps, es, "|)&;")){
+  while(!peek(ps, es, "|)&;")){  // 不以它们打头，也就是在填参数
     if((tok=gettoken(ps, es, &q, &eq)) == 0)
       break;
     if(tok != 'a')
@@ -441,7 +451,7 @@ parseexec(char **ps, char *es)
     ret = parseredirs(ret, ps, es);
   }
   cmd->argv[argc] = 0;
-  cmd->eargv[argc] = 0;
+  cmd->eargv[argc] = 0;  // 结束
   return ret;
 }
 

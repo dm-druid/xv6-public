@@ -31,9 +31,9 @@ struct {
 void
 kinit1(void *vstart, void *vend)
 {
-  initlock(&kmem.lock, "kmem");
+  initlock(&kmem.lock, "kmem");       // 初始化锁，名字，cpu0，占用0
   kmem.use_lock = 0;
-  freerange(vstart, vend);
+  freerange(vstart, vend);            // 开辟空闲空间
 }
 
 void
@@ -47,7 +47,7 @@ void
 freerange(void *vstart, void *vend)
 {
   char *p;
-  p = (char*)PGROUNDUP((uint)vstart);
+  p = (char*)PGROUNDUP((uint)vstart);       // 得到vstart起始的4096字节后的位置，并以4096截断
   for(; p + PGSIZE <= (char*)vend; p += PGSIZE)
     kfree(p);
 }
@@ -60,18 +60,18 @@ void
 kfree(char *v)
 {
   struct run *r;
-
+  // 起始位置没有和页面大小对齐，v在内核ELF段内，v的物理地址超出，则报错
   if((uint)v % PGSIZE || v < end || V2P(v) >= PHYSTOP)
     panic("kfree");
 
   // Fill with junk to catch dangling refs.
-  memset(v, 1, PGSIZE);
+  memset(v, 1, PGSIZE);       // 将被释放的内存每一个字节设为1，垃圾数据，使错误代码尽早崩溃
 
   if(kmem.use_lock)
     acquire(&kmem.lock);
   r = (struct run*)v;
   r->next = kmem.freelist;
-  kmem.freelist = r;
+  kmem.freelist = r;          //  kmem.freelist 链表向后接，接上开辟的位于v的地址。
   if(kmem.use_lock)
     release(&kmem.lock);
 }
@@ -79,16 +79,17 @@ kfree(char *v)
 // Allocate one 4096-byte page of physical memory.
 // Returns a pointer that the kernel can use.
 // Returns 0 if the memory cannot be allocated.
+// 申请一个空闲页，返回虚拟地址
 char*
 kalloc(void)
 {
   struct run *r;
 
   if(kmem.use_lock)
-    acquire(&kmem.lock);
-  r = kmem.freelist;
+    acquire(&kmem.lock);      // 如果开启锁机制，就上锁
+  r = kmem.freelist;          // 链表不为空，不到尾部
   if(r)
-    kmem.freelist = r->next;
+    kmem.freelist = r->next;  // 如果没有到尾部，就下一项，直到链表表尾，返回空指针
   if(kmem.use_lock)
     release(&kmem.lock);
   return (char*)r;

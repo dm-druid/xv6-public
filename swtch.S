@@ -16,7 +16,7 @@ swtch:
   pushl %esi
   pushl %edi
 
-  # Switch stacks
+  # Switch stacks  %edx存放着新的栈，旧栈的的栈顶放到%eax所指向的地址，用作返回值？
   movl %esp, (%eax)
   movl %edx, %esp
 

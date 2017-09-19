@@ -70,85 +70,90 @@ myproc(void) {
 // If found, change state to EMBRYO and initialize
 // state required to run in the kernel.
 // Otherwise return 0.
+// 分配并初始化一个进程，为其分配一页大小的内核栈，栈内填充 trap frame，trapret 和 context
+// 进程表中没有可用的进程空间，则返回0
 static struct proc*
 allocproc(void)
 {
   struct proc *p;
   char *sp;
 
-  acquire(&ptable.lock);
+  acquire(&ptable.lock);  // 进程表是否被上锁，如果上锁则等待。 对其上锁。
 
   for(p = ptable.proc; p < &ptable.proc[NPROC]; p++)
     if(p->state == UNUSED)
-      goto found;
+      goto found;  // 找到一个进程表是未使用状态,初始状态就是所有的proc都是未使用状态
 
-  release(&ptable.lock);
+  release(&ptable.lock);  // 进程表解锁
   return 0;
 
 found:
-  p->state = EMBRYO;
-  p->pid = nextpid++;
+  p->state = EMBRYO;              // 将该进程状态设置为初始化状态
+  p->pid = nextpid++;             // 为该进程赋唯一pid
 
-  release(&ptable.lock);
+  release(&ptable.lock);          // 解锁进程表
 
-  // Allocate kernel stack.
+  // Allocate kernel stack. 分配内核栈，寻找空闲的内存页。
   if((p->kstack = kalloc()) == 0){
     p->state = UNUSED;
     return 0;
   }
-  sp = p->kstack + KSTACKSIZE;
+  sp = p->kstack + KSTACKSIZE;    // 4096大小的内核栈
 
-  // Leave room for trap frame.
+  // Leave room for trap frame.  在最后预留一个trap frame 大小的空间，用于保存用户寄存器
   sp -= sizeof *p->tf;
   p->tf = (struct trapframe*)sp;
 
   // Set up new context to start executing at forkret,
   // which returns to trapret.
   sp -= 4;
-  *(uint*)sp = (uint)trapret;
+  *(uint*)sp = (uint)trapret;   // 放在context的上面
 
-  sp -= sizeof *p->context;
+  sp -= sizeof *p->context;     // 分配上下文，记录运行进程时，寄存器的状态
   p->context = (struct context*)sp;
-  memset(p->context, 0, sizeof *p->context);
-  p->context->eip = (uint)forkret;
+  memset(p->context, 0, sizeof *p->context);  // 清零
+  p->context->eip = (uint)forkret;     // 将forkret的位置放入指令寄存器，进程从此处运行
 
   return p;
 }
 
 //PAGEBREAK: 32
-// Set up first user process.
+// Set up first user process. 设置第一个进程
 void
 userinit(void)
 {
   struct proc *p;
   extern char _binary_initcode_start[], _binary_initcode_size[];
 
-  p = allocproc();
+  p = allocproc();  // 分配进程
   
   initproc = p;
-  if((p->pgdir = setupkvm()) == 0)
+  // 为进程创建一个只映射了内核区的页表
+  if((p->pgdir = setupkvm()) == 0)  
     panic("userinit: out of memory?");
+  // 分配一页物理内存，将虚拟地址0映射到 initcode.S 即将拷贝去的内存中去
   inituvm(p->pgdir, _binary_initcode_start, (int)_binary_initcode_size);
   p->sz = PGSIZE;
   memset(p->tf, 0, sizeof(*p->tf));
-  p->tf->cs = (SEG_UCODE << 3) | DPL_USER;
-  p->tf->ds = (SEG_UDATA << 3) | DPL_USER;
+  p->tf->cs = (SEG_UCODE << 3) | DPL_USER;  //  段选择器指向用户代码段，权限为特权级
+  p->tf->ds = (SEG_UDATA << 3) | DPL_USER;  //  用户数据段
   p->tf->es = p->tf->ds;
   p->tf->ss = p->tf->ds;
-  p->tf->eflags = FL_IF;
-  p->tf->esp = PGSIZE;
-  p->tf->eip = 0;  // beginning of initcode.S
+  p->tf->eflags = FL_IF;                    // 允许硬件中断
+  p->tf->esp = PGSIZE;                      // 一页大小，最大有效虚拟内存地址
+  p->tf->eip = 0;  // beginning of initcode.S 被映射到了虚拟内存0的位置
 
   safestrcpy(p->name, "initcode", sizeof(p->name));
-  p->cwd = namei("/");
+  p->cwd = namei("/");    // chapter 6
 
   // this assignment to p->state lets other cores
   // run this process. the acquire forces the above
   // writes to be visible, and the lock is also needed
   // because the assignment might not be atomic.
+  // 尽管注释进行了说明，但我还是没懂为什么要上锁，因为这种赋值不原子化？不原子化又怎么样呢？
   acquire(&ptable.lock);
 
-  p->state = RUNNABLE;
+  p->state = RUNNABLE;                      // 可运行状态
 
   release(&ptable.lock);
 }
@@ -314,7 +319,7 @@ wait(void)
 //PAGEBREAK: 42
 // Per-CPU process scheduler.
 // Each CPU calls scheduler() after setting itself up.
-// Scheduler never returns.  It loops, doing:
+// Scheduler never returns.  It loops, doing:  永不停息的CPU调度
 //  - choose a process to run
 //  - swtch to start running that process
 //  - eventually that process transfers control
@@ -327,7 +332,7 @@ scheduler(void)
   c->proc = 0;
   
   for(;;){
-    // Enable interrupts on this processor.
+    // Enable interrupts on this processor. 开中断
     sti();
 
     // Loop over process table looking for process to run.
@@ -340,11 +345,11 @@ scheduler(void)
       // to release ptable.lock and then reacquire it
       // before jumping back to us.
       c->proc = p;
-      switchuvm(p);
+      switchuvm(p);     // 通知硬件开始使用目标进程的页表
       p->state = RUNNING;
 
-      swtch(&(c->scheduler), p->context);
-      switchkvm();
+      swtch(&(c->scheduler), p->context);  // 保存当前上下文，切换至新的上下文
+      switchkvm();                         // 切换至内核态的页表
 
       // Process is done running for now.
       // It should have changed its p->state before coming back.
